@@ -10,9 +10,6 @@ const deviceIdInput = document.getElementById('deviceIdInput');
 const commandInput = document.getElementById('commandInput');
 const sendBtn = document.getElementById('sendBtn');
 
-// Simple char whitelist matching the server's DEVICE_ID_RE / COMMAND_RE
-const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
 let ws = null;
 let authenticated = false;
 
@@ -43,8 +40,25 @@ function connectWebSocket() {
         try {
             const data = JSON.parse(event.data);
 
+            // --- AUTH RESULT: must be handled first, or the dashboard
+            // never unlocks even when the password is correct ---
+            if (data.type === 'auth_result') {
+                loginBtn.disabled = false;
+                if (data.ok) {
+                    authenticated = true;
+                    loginSection.style.display = 'none';
+                    dashboardSection.style.display = 'block';
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'connected';
+                    addMessage('Connected to Relay Server');
+                } else {
+                    loginError.style.display = 'block';
+                }
+                return;
+            }
+
             // --- CHECK IF IT'S A HUGE IMAGE DOWNLOAD ---
-            if (data.type === "phone_response" && data.data && data.data.length > 200000) {
+            if (data.type === "phone_response" && data.data && typeof data.data === "string" && data.data.length > 200000) {
                 // It's a large Base64 string (photo/video)
                 const base64String = data.data;
 
@@ -62,17 +76,12 @@ function connectWebSocket() {
                 link.style.textAlign = 'center';
                 link.style.textDecoration = 'none';
 
-                // Add the link to the chat instead of the raw text
-                const messagesDiv = document.getElementById('messages'); // Replace with your actual div ID
-                if (messagesDiv) {
-                    messagesDiv.appendChild(link);
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                }
+                messagesEl.appendChild(link);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
                 return; // Stop here, don't print the raw text
             }
 
             // --- FOR SMALL TEXTS (PING, STATUS, FILES LIST) ---
-            // If it's normal text, print it to the chat
             let displayText = event.data;
             if (data.type === "phone_response" && data.data) {
                 displayText = `[${data.deviceId}] ${data.data}`;
@@ -84,6 +93,7 @@ function connectWebSocket() {
             addMessage(event.data);
         }
     };
+
     ws.onclose = () => {
         loginBtn.disabled = false;
 
@@ -125,10 +135,7 @@ sendBtn.onclick = () => {
         return;
     }
 
-    // UPDATED: Allow slashes (/) and dots (.) so you can download files and use endpoints like photo/front
     if (cmd && ws && ws.readyState === WebSocket.OPEN) {
-        // If you want to be extra safe, you can check for dangerous patterns here, 
-        // but you are the only one using this dashboard behind a password.
         const payload = JSON.stringify({
             targetDeviceId: deviceId,
             command: cmd
