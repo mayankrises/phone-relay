@@ -2,6 +2,8 @@ const express = require('express');
 const WebSocket = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const multer = require('multer');           // <-- NEW
+const fs = require('fs');                   // <-- NEW
 
 const app = express();
 
@@ -27,16 +29,13 @@ const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const COMMAND_RE = /^[A-Za-z0-9_\-.\/]{1,100}$/;
 
 // ---------- BRUTE-FORCE PROTECTION ----------
-// Per-IP tracking of failed auth attempts (both /dash and /phone).
 const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 60 * 1000;       // failures counted within this window
-const LOCKOUT_MS = 5 * 60 * 1000;  // lockout duration after too many failures
+const WINDOW_MS = 60 * 1000;
+const LOCKOUT_MS = 5 * 60 * 1000;
 
-const attemptTracker = new Map(); // ip -> { count, windowStart, lockedUntil }
+const attemptTracker = new Map();
 
 function getClientIp(req) {
-    // If you're behind a reverse proxy (nginx, Cloudflare, etc.), make sure
-    // it sets X-Forwarded-For and that you trust only that proxy.
     const fwd = req.headers['x-forwarded-for'];
     return (fwd ? fwd.split(',')[0].trim() : null) || req.socket.remoteAddress;
 }
@@ -66,7 +65,6 @@ function recordSuccess(ip) {
     attemptTracker.delete(ip);
 }
 
-// Periodic cleanup so the map doesn't grow forever
 setInterval(() => {
     const now = Date.now();
     for (const [ip, rec] of attemptTracker.entries()) {
@@ -77,9 +75,6 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 // ---------- TIMING-SAFE COMPARE ----------
-// Plain !== / === leaks how many leading characters matched via timing.
-// Pad to equal length first so timingSafeEqual doesn't throw on mismatch,
-// while still returning false for any length mismatch.
 function safeCompare(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
     const bufA = Buffer.from(a);
@@ -97,8 +92,42 @@ app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src * ws: wss:"); next();
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src * ws: wss:");
+    next();
 });
+
+// ---------- FILE UPLOAD ENDPOINT (NEW) ----------
+// Configure multer to save files to 'uploads/' folder
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = path.join(__dirname, 'uploads');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        // Keep original name with timestamp to avoid collisions
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, unique + '-' + file.originalname);
+    }
+});
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 20 * 1024 * 1024 } // 20MB max
+});
+
+// POST /upload - accepts a single file with field name 'file'
+app.post('/upload', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+    // Construct the public URL
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    console.log(`📤 File uploaded: ${fileUrl}`);
+    res.json({ url: fileUrl });
+});
+
+// Serve static files from the 'uploads' folder (so users can download)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ---------- STORE CONNECTIONS ----------
 const phoneSockets = new Map();
@@ -107,10 +136,6 @@ const dashSockets = new Set();
 // ---------- WEBSOCKET SERVER ----------
 const server = require('http').createServer(app);
 
-// Phone auth still happens via query string at handshake time (device firmware
-// presumably can't easily do a first-message auth handshake). Dashboard auth
-// happens via a first message after connect, so the password never appears
-// in a URL, log line, or browser history.
 const wss = new WebSocket.Server({
     server,
     maxPayload: MAX_MESSAGE_BYTES,
@@ -125,8 +150,6 @@ const wss = new WebSocket.Server({
         }
 
         if (pathname === '/dash') {
-            // No secret in the URL anymore — just accept the upgrade and
-            // require auth as the first WS message. Reject anything else.
             return done(true);
         }
 
@@ -192,12 +215,11 @@ wss.on('connection', (ws, req) => {
             if (!ws.authenticated) {
                 ws.close(1008, 'Auth timeout');
             }
-        }, 5000); // must authenticate within 5s of connecting
+        }, 5000);
 
         console.log(`🖥️ Dashboard socket opened from ${ip}, awaiting auth`);
 
         ws.on('message', (raw) => {
-            // ---- Not yet authenticated: only accept an auth message ----
             if (!ws.authenticated) {
                 if (isLockedOut(ip)) {
                     ws.close(1008, 'Too many attempts');
@@ -226,7 +248,6 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
 
-                // Success
                 recordSuccess(ip);
                 clearTimeout(authTimeout);
                 ws.authenticated = true;
@@ -277,8 +298,6 @@ wss.on('connection', (ws, req) => {
 });
 
 // ---------- SERVE DASHBOARD HTML + STATIC ASSETS ----------
-// Serves src/dashboard.js (and any other static assets you add to src/)
-// so the CSP's script-src 'self' can load them.
 app.use(express.static(path.join(__dirname, 'src')));
 
 app.get('/', (req, res) => {
@@ -287,4 +306,5 @@ app.get('/', (req, res) => {
 
 server.listen(PORT, () => {
     console.log(`✅ Relay running on port ${PORT}`);
+    console.log(`📤 Upload endpoint available at /upload`);
 });
