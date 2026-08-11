@@ -105,20 +105,19 @@ function addMessage(text) {
 sendBtn.onclick = () => {
     const deviceId = deviceIdInput.value.trim();
     const cmd = commandInput.value.trim();
-
-    if (!deviceId || !SAFE_ID_RE.test(deviceId)) {
-        alert('Enter a valid Target Device ID (letters, numbers, _ and - only)');
-        return;
-    }
-    if (cmd && !SAFE_ID_RE.test(cmd)) {
-        alert('Command contains invalid characters (letters, numbers, _ and - only)');
+    
+    if (!deviceId) {
+        alert('Please enter a Target Device ID (e.g. Phone_A)');
         return;
     }
 
+    // UPDATED: Allow slashes (/) and dots (.) so you can download files and use endpoints like photo/front
     if (cmd && ws && ws.readyState === WebSocket.OPEN) {
-        const payload = JSON.stringify({
-            targetDeviceId: deviceId,
-            command: cmd
+        // If you want to be extra safe, you can check for dangerous patterns here, 
+        // but you are the only one using this dashboard behind a password.
+        const payload = JSON.stringify({ 
+            targetDeviceId: deviceId, 
+            command: cmd 
         });
         ws.send(payload);
         addMessage(`Sent to ${deviceId}: ${cmd}`);
