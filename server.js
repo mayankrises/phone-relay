@@ -277,7 +277,11 @@ wss.on('connection', (ws, req) => {
     }
 });
 
-// ---------- SERVE DASHBOARD HTML ----------
+// ---------- SERVE DASHBOARD HTML + STATIC ASSETS ----------
+// Serves src/dashboard.js (and any other static assets you add to src/)
+// so the CSP's script-src 'self' can load them.
+app.use(express.static(path.join(__dirname, 'src')));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'src', 'index.html'));
 });
