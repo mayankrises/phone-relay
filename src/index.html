@@ -9,14 +9,18 @@
         .connected { color: green; }
         .disconnected { color: red; }
         #messages { border: 1px solid #ddd; padding: 10px; height: 200px; overflow-y: scroll; max-width: 600px; margin-top: 20px; }
+        .input-group { margin-bottom: 10px; }
+        input { padding: 8px; margin-right: 5px; }
     </style>
 </head>
 <body>
     <h1>Phone Relay Dashboard</h1>
     <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
     
-    <div>
-        <input type="text" id="commandInput" placeholder="Enter command (e.g. {'command': 'toggle_flash'})" style="width: 300px;">
+    <!-- UPDATED: Added a target device ID input -->
+    <div class="input-group">
+        <input type="text" id="deviceIdInput" placeholder="Target Device ID (e.g. Phone_A)" style="width: 180px;">
+        <input type="text" id="commandInput" placeholder="Command (e.g. toggle_flash)" style="width: 250px;">
         <button id="sendBtn">Send Command</button>
     </div>
 
@@ -25,6 +29,7 @@
     <script>
         const statusEl = document.getElementById('status');
         const messagesEl = document.getElementById('messages');
+        const deviceIdInput = document.getElementById('deviceIdInput');
         const commandInput = document.getElementById('commandInput');
         const sendBtn = document.getElementById('sendBtn');
 
@@ -43,7 +48,12 @@
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                addMessage(`Server: ${JSON.stringify(data)}`);
+                // UPDATED: If the server sends back a deviceId (like phone responses), we show it
+                if (data.deviceId) {
+                    addMessage(`📱 ${data.deviceId}: ${JSON.stringify(data.data)}`);
+                } else {
+                    addMessage(`Server: ${JSON.stringify(data)}`);
+                }
             } catch (e) {
                 addMessage(`Received: ${event.data}`);
             }
@@ -62,11 +72,27 @@
             messagesEl.scrollTop = messagesEl.scrollHeight;
         }
 
+        // UPDATED: The send button now packages the command with the targetDeviceId
         sendBtn.onclick = () => {
-            const val = commandInput.value.trim();
-            if (val && ws.readyState === WebSocket.OPEN) {
-                ws.send(val);
-                addMessage(`Sent: ${val}`);
+            const deviceId = deviceIdInput.value.trim();
+            const cmd = commandInput.value.trim();
+            
+            if (!deviceId) {
+                alert('Please enter a Target Device ID (e.g. Phone_A)');
+                return;
+            }
+
+            if (cmd && ws.readyState === WebSocket.OPEN) {
+                // Format the message exactly how the server expects it
+                const payload = JSON.stringify({ 
+                    targetDeviceId: deviceId, 
+                    command: cmd 
+                });
+                
+                ws.send(payload);
+                addMessage(`Sent to ${deviceId}: ${cmd}`);
+                
+                // Clear the command input (keep the device ID for next time)
                 commandInput.value = '';
             } else {
                 alert('Not connected or empty command');
