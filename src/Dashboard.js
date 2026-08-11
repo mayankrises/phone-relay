@@ -89,7 +89,7 @@ function connectWebSocket() {
 }
 
 loginBtn.onclick = connectWebSocket;
-passwordInput.addEventListener("keypress", function(event) {
+passwordInput.addEventListener("keypress", function (event) {
     if (event.key === "Enter") {
         connectWebSocket();
     }
