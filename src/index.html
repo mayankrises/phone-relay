@@ -15,55 +15,96 @@
 </head>
 <body>
     <h1>Phone Relay Dashboard</h1>
-    <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
-    
-    <!-- UPDATED: Added a target device ID input -->
-    <div class="input-group">
-        <input type="text" id="deviceIdInput" placeholder="Target Device ID (e.g. Phone_A)" style="width: 180px;">
-        <input type="text" id="commandInput" placeholder="Command (e.g. toggle_flash)" style="width: 250px;">
-        <button id="sendBtn">Send Command</button>
+
+    <!-- NEW LOGIN SECTION -->
+    <div id="loginSection">
+        <p>Enter Dashboard Password to connect:</p>
+        <input type="password" id="passwordInput" placeholder="Enter password">
+        <button id="loginBtn">Connect</button>
     </div>
 
-    <div id="messages"></div>
+    <!-- MAIN DASHBOARD (Hidden by default until password is entered) -->
+    <div id="dashboardSection" style="display: none;">
+        <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
+        
+        <div class="input-group">
+            <input type="text" id="deviceIdInput" placeholder="Target Device ID (e.g. Phone_A)" style="width: 180px;">
+            <input type="text" id="commandInput" placeholder="Command (e.g. toggle_flash)" style="width: 250px;">
+            <button id="sendBtn">Send Command</button>
+        </div>
+
+        <div id="messages"></div>
+    </div>
 
     <script>
+        const loginSection = document.getElementById('loginSection');
+        const dashboardSection = document.getElementById('dashboardSection');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginBtn = document.getElementById('loginBtn');
+        
         const statusEl = document.getElementById('status');
         const messagesEl = document.getElementById('messages');
         const deviceIdInput = document.getElementById('deviceIdInput');
         const commandInput = document.getElementById('commandInput');
         const sendBtn = document.getElementById('sendBtn');
 
-        // Determine WebSocket protocol based on page protocol
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/dash`;
+        let ws = null;
 
-        const ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-            statusEl.textContent = 'Connected';
-            statusEl.className = 'connected';
-            addMessage('Connected to Relay Server');
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                // UPDATED: If the server sends back a deviceId (like phone responses), we show it
-                if (data.deviceId) {
-                    addMessage(`📱 ${data.deviceId}: ${JSON.stringify(data.data)}`);
-                } else {
-                    addMessage(`Server: ${JSON.stringify(data)}`);
-                }
-            } catch (e) {
-                addMessage(`Received: ${event.data}`);
+        // Function to connect when password is entered
+        function connectWebSocket() {
+            const password = passwordInput.value.trim();
+            if (!password) {
+                alert("Please enter the dashboard password.");
+                return;
             }
-        };
 
-        ws.onclose = () => {
-            statusEl.textContent = 'Disconnected';
-            statusEl.className = 'disconnected';
-            addMessage('Disconnected from server');
-        };
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Append the password to the WebSocket URL
+            const wsUrl = `${protocol}//${window.location.host}/dash?password=${password}`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                // Hide login, show dashboard
+                loginSection.style.display = 'none';
+                dashboardSection.style.display = 'block';
+                
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'connected';
+                addMessage('Connected to Relay Server');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.deviceId) {
+                        addMessage(`📱 ${data.deviceId}: ${JSON.stringify(data.data)}`);
+                    } else {
+                        addMessage(`Server: ${JSON.stringify(data)}`);
+                    }
+                } catch (e) {
+                    addMessage(`Received: ${event.data}`);
+                }
+            };
+
+            ws.onclose = () => {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'disconnected';
+                addMessage('Disconnected from server');
+                
+                // If disconnected, go back to login screen
+                dashboardSection.style.display = 'none';
+                loginSection.style.display = 'block';
+            };
+        }
+
+        loginBtn.onclick = connectWebSocket;
+        // Allow pressing Enter key to log in
+        passwordInput.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                connectWebSocket();
+            }
+        });
 
         function addMessage(text) {
             const p = document.createElement('p');
@@ -72,7 +113,6 @@
             messagesEl.scrollTop = messagesEl.scrollHeight;
         }
 
-        // UPDATED: The send button now packages the command with the targetDeviceId
         sendBtn.onclick = () => {
             const deviceId = deviceIdInput.value.trim();
             const cmd = commandInput.value.trim();
@@ -82,17 +122,13 @@
                 return;
             }
 
-            if (cmd && ws.readyState === WebSocket.OPEN) {
-                // Format the message exactly how the server expects it
+            if (cmd && ws && ws.readyState === WebSocket.OPEN) {
                 const payload = JSON.stringify({ 
                     targetDeviceId: deviceId, 
                     command: cmd 
                 });
-                
                 ws.send(payload);
                 addMessage(`Sent to ${deviceId}: ${cmd}`);
-                
-                // Clear the command input (keep the device ID for next time)
                 commandInput.value = '';
             } else {
                 alert('Not connected or empty command');

@@ -53,7 +53,17 @@ wss.on('connection', (ws, req) => {
 
   // 2. DASHBOARD CONNECTION (your browser)
   if (pathname === '/dash') {
-    console.log('🖥️ Dashboard connected');
+    // NEW: Get dashboard password from URL
+    const dashPass = url.searchParams.get('password');
+
+    // NEW: Verify dashboard password
+    if (dashPass !== process.env.DASHBOARD_PASSWORD) {
+      console.log('❌ Unauthorized dashboard connection attempt (Wrong Password)');
+      ws.close(1008, 'Unauthorized Dashboard Password');
+      return;
+    }
+
+    console.log('🖥️ Dashboard connected!');
     dashSockets.add(ws);
 
     ws.on('message', (raw) => {
