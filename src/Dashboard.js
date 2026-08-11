@@ -83,8 +83,10 @@ function connectWebSocket() {
 
             // --- FOR SMALL TEXTS (PING, STATUS, FILES LIST) ---
             let displayText = event.data;
-            if (data.type === "phone_response" && data.data) {
-                displayText = `[${data.deviceId}] ${data.data}`;
+            if (data.type === "phone_response") {
+                // If data.data is an object, stringify it; otherwise use it as-is.
+                const responseText = typeof data.data === 'string' ? data.data : JSON.stringify(data.data, null, 2);
+                displayText = `[${data.deviceId}] ${responseText}`;
             }
             addMessage(displayText);
 
