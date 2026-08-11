@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Relay Dashboard</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .connected { color: green; }
+        .disconnected { color: red; }
+        #messages { border: 1px solid #ddd; padding: 10px; height: 200px; overflow-y: scroll; max-width: 600px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Phone Relay Dashboard</h1>
+    <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
+    
+    <div>
+        <input type="text" id="commandInput" placeholder="Enter command (e.g. {'command': 'toggle_flash'})" style="width: 300px;">
+        <button id="sendBtn">Send Command</button>
+    </div>
+
+    <div id="messages"></div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const messagesEl = document.getElementById('messages');
+        const commandInput = document.getElementById('commandInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Determine WebSocket protocol based on page protocol
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/dash`;
+
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            statusEl.textContent = 'Connected';
+            statusEl.className = 'connected';
+            addMessage('Connected to Relay Server');
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                addMessage(`Server: ${JSON.stringify(data)}`);
+            } catch (e) {
+                addMessage(`Received: ${event.data}`);
+            }
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = 'Disconnected';
+            statusEl.className = 'disconnected';
+            addMessage('Disconnected from server');
+        };
+
+        function addMessage(text) {
+            const p = document.createElement('p');
+            p.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            messagesEl.appendChild(p);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        sendBtn.onclick = () => {
+            const val = commandInput.value.trim();
+            if (val && ws.readyState === WebSocket.OPEN) {
+                ws.send(val);
+                addMessage(`Sent: ${val}`);
+                commandInput.value = '';
+            } else {
+                alert('Not connected or empty command');
+            }
+        };
+    </script>
+</body>
+</html>

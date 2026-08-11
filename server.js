@@ -73,7 +73,7 @@ wss.on('connection', (ws, req) => {
 
 // ---------- SERVE DASHBOARD HTML ----------
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'src' ,'index.html'));
 });
 
 server.listen(PORT, () => {
