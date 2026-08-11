@@ -11,22 +11,24 @@
         #messages { border: 1px solid #ddd; padding: 10px; height: 200px; overflow-y: scroll; max-width: 600px; margin-top: 20px; }
         .input-group { margin-bottom: 10px; }
         input { padding: 8px; margin-right: 5px; }
+        #loginError { color: red; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
     <h1>Phone Relay Dashboard</h1>
 
-    <!-- NEW LOGIN SECTION -->
+    <!-- LOGIN SECTION -->
     <div id="loginSection">
         <p>Enter Dashboard Password to connect:</p>
-        <input type="password" id="passwordInput" placeholder="Enter password">
+        <input type="password" id="passwordInput" placeholder="Enter password" autocomplete="off">
         <button id="loginBtn">Connect</button>
+        <p id="loginError">Incorrect password or too many attempts. Try again shortly.</p>
     </div>
 
-    <!-- MAIN DASHBOARD (Hidden by default until password is entered) -->
+    <!-- MAIN DASHBOARD (Hidden until the server confirms auth) -->
     <div id="dashboardSection" style="display: none;">
         <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
-        
+
         <div class="input-group">
             <input type="text" id="deviceIdInput" placeholder="Target Device ID (e.g. Phone_A)" style="width: 180px;">
             <input type="text" id="commandInput" placeholder="Command (e.g. toggle_flash)" style="width: 250px;">
@@ -41,65 +43,97 @@
         const dashboardSection = document.getElementById('dashboardSection');
         const passwordInput = document.getElementById('passwordInput');
         const loginBtn = document.getElementById('loginBtn');
-        
+        const loginError = document.getElementById('loginError');
+
         const statusEl = document.getElementById('status');
         const messagesEl = document.getElementById('messages');
         const deviceIdInput = document.getElementById('deviceIdInput');
         const commandInput = document.getElementById('commandInput');
         const sendBtn = document.getElementById('sendBtn');
 
-        let ws = null;
+        // Simple char whitelist matching the server's DEVICE_ID_RE / COMMAND_RE
+        const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-        // Function to connect when password is entered
+        let ws = null;
+        let authenticated = false;
+
         function connectWebSocket() {
-            const password = passwordInput.value.trim();
+            const password = passwordInput.value;
             if (!password) {
                 alert("Please enter the dashboard password.");
                 return;
             }
 
+            loginError.style.display = 'none';
+            loginBtn.disabled = true;
+            authenticated = false;
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Append the password to the WebSocket URL
-            const wsUrl = `${protocol}//${window.location.host}/dash?password=${password}`;
+            // No password in the URL — connect first, then authenticate
+            // over the socket so the secret never lands in logs/history.
+            const wsUrl = `${protocol}//${window.location.host}/dash`;
 
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                // Hide login, show dashboard
-                loginSection.style.display = 'none';
-                dashboardSection.style.display = 'block';
-                
-                statusEl.textContent = 'Connected';
-                statusEl.className = 'connected';
-                addMessage('Connected to Relay Server');
+                // Send the auth message as the very first frame.
+                ws.send(JSON.stringify({ type: 'auth', password }));
+                // Clear it from memory immediately; we don't need it again.
+                passwordInput.value = '';
             };
 
             ws.onmessage = (event) => {
+                let data;
                 try {
-                    const data = JSON.parse(event.data);
-                    if (data.deviceId) {
-                        addMessage(`📱 ${data.deviceId}: ${JSON.stringify(data.data)}`);
-                    } else {
-                        addMessage(`Server: ${JSON.stringify(data)}`);
-                    }
+                    data = JSON.parse(event.data);
                 } catch (e) {
                     addMessage(`Received: ${event.data}`);
+                    return;
+                }
+
+                if (data.type === 'auth_result') {
+                    loginBtn.disabled = false;
+                    if (data.ok) {
+                        authenticated = true;
+                        loginSection.style.display = 'none';
+                        dashboardSection.style.display = 'block';
+                        statusEl.textContent = 'Connected';
+                        statusEl.className = 'connected';
+                        addMessage('Connected to Relay Server');
+                    } else {
+                        loginError.style.display = 'block';
+                    }
+                    return;
+                }
+
+                if (data.deviceId) {
+                    addMessage(`📱 ${data.deviceId}: ${JSON.stringify(data.data)}`);
+                } else {
+                    addMessage(`Server: ${JSON.stringify(data)}`);
                 }
             };
 
             ws.onclose = () => {
+                loginBtn.disabled = false;
+
+                if (!authenticated) {
+                    // Handshake succeeded but auth failed/timed out, or the
+                    // server rejected us for rate limiting.
+                    loginError.style.display = 'block';
+                    return;
+                }
+
                 statusEl.textContent = 'Disconnected';
                 statusEl.className = 'disconnected';
                 addMessage('Disconnected from server');
-                
-                // If disconnected, go back to login screen
+
                 dashboardSection.style.display = 'none';
                 loginSection.style.display = 'block';
+                authenticated = false;
             };
         }
 
         loginBtn.onclick = connectWebSocket;
-        // Allow pressing Enter key to log in
         passwordInput.addEventListener("keypress", function(event) {
             if (event.key === "Enter") {
                 connectWebSocket();
@@ -116,16 +150,20 @@
         sendBtn.onclick = () => {
             const deviceId = deviceIdInput.value.trim();
             const cmd = commandInput.value.trim();
-            
-            if (!deviceId) {
-                alert('Please enter a Target Device ID (e.g. Phone_A)');
+
+            if (!deviceId || !SAFE_ID_RE.test(deviceId)) {
+                alert('Enter a valid Target Device ID (letters, numbers, _ and - only)');
+                return;
+            }
+            if (cmd && !SAFE_ID_RE.test(cmd)) {
+                alert('Command contains invalid characters (letters, numbers, _ and - only)');
                 return;
             }
 
             if (cmd && ws && ws.readyState === WebSocket.OPEN) {
-                const payload = JSON.stringify({ 
-                    targetDeviceId: deviceId, 
-                    command: cmd 
+                const payload = JSON.stringify({
+                    targetDeviceId: deviceId,
+                    command: cmd
                 });
                 ws.send(payload);
                 addMessage(`Sent to ${deviceId}: ${cmd}`);
