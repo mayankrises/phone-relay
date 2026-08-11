@@ -6,8 +6,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ---------- STORE CONNECTIONS ----------
-let phoneSocket = null;        // Your Android phone
-const dashSockets = new Set(); // Your browser tabs
+// We use a Map to store phones so we can look them up by their unique deviceId
+const phoneSockets = new Map(); 
+const dashSockets = new Set(); 
 
 // ---------- WEBSOCKET SERVER ----------
 const server = require('http').createServer(app);
@@ -20,28 +21,32 @@ wss.on('connection', (ws, req) => {
   // 1. PHONE CONNECTION (authenticated via token)
   if (pathname === '/phone') {
     const token = url.searchParams.get('token');
-    if (token !== process.env.PHONE_SECRET) {
-      ws.close(1008, 'Unauthorized');
+    const deviceId = url.searchParams.get('deviceId'); // Get the device ID
+
+    // Validate that we have a token and a device ID
+    if (token !== process.env.PHONE_SECRET || !deviceId) {
+      ws.close(1008, 'Unauthorized or missing Device ID');
       return;
     }
-    console.log('📱 Phone connected!');
-    phoneSocket = ws;
+
+    console.log(`📱 Phone (${deviceId}) connected!`);
+    phoneSockets.set(deviceId, ws); // Store the connection using the deviceId as the key
 
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw);
-        // Relay phone's response to ALL dashboards
+        // Relay phone's response to ALL connected dashboards
         dashSockets.forEach(dash => {
           if (dash.readyState === WebSocket.OPEN) {
-            dash.send(JSON.stringify({ type: 'phone_response', data: msg }));
+            dash.send(JSON.stringify({ type: 'phone_response', deviceId: deviceId, data: msg }));
           }
         });
       } catch (e) { console.error('Relay error:', e); }
     });
 
     ws.on('close', () => {
-      console.log('📱 Phone disconnected');
-      phoneSocket = null;
+      console.log(`📱 Phone (${deviceId}) disconnected`);
+      phoneSockets.delete(deviceId); // Remove from the Map when they disconnect
     });
     return;
   }
@@ -54,15 +59,29 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (raw) => {
       try {
         const command = JSON.parse(raw);
-        if (phoneSocket && phoneSocket.readyState === WebSocket.OPEN) {
-          phoneSocket.send(JSON.stringify(command));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Phone is offline' }));
+        
+        // The Dashboard must now send a "targetDeviceId" in the JSON command
+        const targetDeviceId = command.targetDeviceId;
+
+        if (!targetDeviceId) {
+          ws.send(JSON.stringify({ type: 'error', msg: 'Missing targetDeviceId in command' }));
+          return;
         }
+
+        // Look up the specific phone in the Map
+        const targetPhone = phoneSockets.get(targetDeviceId);
+
+        if (targetPhone && targetPhone.readyState === WebSocket.OPEN) {
+          targetPhone.send(JSON.stringify(command));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', msg: `Phone '${targetDeviceId}' is offline` }));
+        }
+
       } catch (e) { console.error('Dashboard error:', e); }
     });
 
     ws.on('close', () => {
+      console.log('🖥️ Dashboard disconnected');
       dashSockets.delete(ws);
     });
     return;
@@ -73,7 +92,7 @@ wss.on('connection', (ws, req) => {
 
 // ---------- SERVE DASHBOARD HTML ----------
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'src' ,'index.html'));
+  res.sendFile(path.join(__dirname, 'src', 'index.html'));
 });
 
 server.listen(PORT, () => {
