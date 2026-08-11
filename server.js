@@ -24,7 +24,7 @@ if (process.env.PHONE_SECRET.length < 20) {
 const PORT = process.env.PORT || 3000;
 const MAX_MESSAGE_BYTES = 8 * 1024; // 8KB — plenty for control commands, blocks abuse
 const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const COMMAND_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const COMMAND_RE = /^[A-Za-z0-9_\-.\/]{1,100}$/;
 
 // ---------- BRUTE-FORCE PROTECTION ----------
 // Per-IP tracking of failed auth attempts (both /dash and /phone).
